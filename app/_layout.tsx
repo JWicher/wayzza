@@ -1,24 +1,69 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack } from "expo-router";
 import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { View, useColorScheme } from 'react-native';
+import { ThemeProvider, darkTheme, lightTheme, useTheme } from '../contexts/ThemeContext';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
-
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
-
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+function ThemedStack() {
+  const { isDark, theme } = useTheme();
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+    <View style={{ flex: 1, backgroundColor: theme.background }}>
+      <StatusBar style={isDark ? "light" : "dark"} backgroundColor={theme.background} />
+      <Stack
+        screenOptions={{
+          headerStyle: {
+            backgroundColor: theme.surface,
+          },
+          headerTintColor: theme.text,
+          headerTitleStyle: {
+            color: theme.text,
+          },
+          contentStyle: {
+            backgroundColor: theme.background,
+          },
+          animation: 'slide_from_right',
+          animationDuration: 150,
+        }}
+      >
+        <Stack.Screen name="index" options={{
+          title: 'Where I Was',
+          headerShown: true,
+          contentStyle: {
+            backgroundColor: theme.background,
+          }
+        }} />
+        <Stack.Screen name="tracking" options={{
+          title: 'Trip Tracking',
+          contentStyle: {
+            backgroundColor: theme.background,
+          }
+        }} />
+        <Stack.Screen name="map" options={{
+          title: 'Your Route',
+          contentStyle: {
+            backgroundColor: theme.background,
+          }
+        }} />
+        <Stack.Screen name="settings" options={{
+          title: 'Settings',
+          contentStyle: {
+            backgroundColor: theme.background,
+          }
+        }} />
       </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    </View>
+  );
+}
+
+export default function RootLayout() {
+  const systemColorScheme = useColorScheme();
+  const initialBackground = systemColorScheme === 'dark' ? darkTheme.background : lightTheme.background;
+
+  return (
+    <View style={{ flex: 1, backgroundColor: initialBackground }}>
+      <ThemeProvider>
+        <ThemedStack />
+      </ThemeProvider>
+    </View>
   );
 }
