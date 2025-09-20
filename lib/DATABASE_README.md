@@ -83,12 +83,13 @@ useEffect(() => {
 }, []);
 ```
 
-#### `getAllRoutes()`
-Returns all unique route names.
+#### `getRoutes()`
+Returns all routes with full details.
 
 ```typescript
-const routes = await getAllRoutes();
-// Returns: string[]
+const routes = await getRoutes();
+// Returns: RouteRecord[]
+// To get just route names: routes.map(route => route.name)
 ```
 
 #### `getCoordinateCountForRoute(route)`

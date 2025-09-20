@@ -1,27 +1,29 @@
 import { Ionicons } from '@expo/vector-icons';
 import {
-  StorageAccessFramework,
   documentDirectory,
   getInfoAsync,
   makeDirectoryAsync,
+  StorageAccessFramework,
   writeAsStringAsync
 } from 'expo-file-system/legacy';
 import * as NavigationBar from 'expo-navigation-bar';
-import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
-  Modal,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
-  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  ClearDataConfirmationModal,
+  ExportDataConfirmationModal,
+  showThemedAlert,
+  TrackingSettingsModal
+} from '../components/modals';
 import { useTheme } from '../contexts/ThemeContext';
 import { clearAllData, exportAllRoutesData, getTrackingSettings, setTrackingSettings } from '../lib/database';
 
@@ -73,16 +75,23 @@ export default function SettingsPage() {
       const totalCleared = result.coordinatesDeleted + result.routesDeleted;
 
       if (totalCleared === 0) {
-        Alert.alert('No Data', 'No route data was found to clear.');
+        showThemedAlert('No Data', 'No route data was found to clear.', [
+          { text: 'OK' }
+        ], 'information-circle-outline');
       } else {
-        Alert.alert(
+        showThemedAlert(
           'Success',
-          `All route data has been cleared.\n\n${result.routesDeleted} route(s) and ${result.coordinatesDeleted} coordinate(s) deleted.`
+          `All route data has been cleared.\n\n${result.routesDeleted} route(s) and ${result.coordinatesDeleted} coordinate(s) deleted.`,
+          [{ text: 'OK' }],
+          'checkmark-circle-outline',
+          '#34d399'
         );
       }
     } catch (error) {
       console.error('Error clearing data:', error);
-      Alert.alert('Error', 'Failed to clear route data. Please try again.');
+      showThemedAlert('Error', 'Failed to clear route data. Please try again.', [
+        { text: 'OK' }
+      ], 'alert-circle-outline', '#f87171');
     }
   };
 
@@ -99,7 +108,9 @@ export default function SettingsPage() {
       console.log('Routes data retrieved:', routesData.length, 'routes');
 
       if (routesData.length === 0) {
-        Alert.alert('No Data', 'No routes found to export.');
+        showThemedAlert('No Data', 'No routes found to export.', [
+          { text: 'OK' }
+        ], 'information-circle-outline');
         return;
       }
 
@@ -108,7 +119,9 @@ export default function SettingsPage() {
         try {
           const permissions = await StorageAccessFramework.requestDirectoryPermissionsAsync();
           if (!permissions.granted) {
-            Alert.alert('Permission Required', 'Permission to access storage is required to export files.');
+            showThemedAlert('Permission Required', 'Permission to access storage is required to export files.', [
+              { text: 'OK' }
+            ], 'lock-closed-outline', '#f59e0b');
             return;
           }
 
@@ -169,14 +182,19 @@ export default function SettingsPage() {
             { encoding: 'utf8' }
           );
 
-          Alert.alert(
+          showThemedAlert(
             'Export Complete',
-            `${routesData.length} routes exported successfully to WIW-routes folder!`
+            `${routesData.length} routes exported successfully to WIW-routes folder!`,
+            [{ text: 'OK' }],
+            'checkmark-circle-outline',
+            '#34d399'
           );
 
         } catch (storageError) {
           console.error('Storage access error:', storageError);
-          Alert.alert('Export Error', 'Failed to access storage. Please try again.');
+          showThemedAlert('Export Error', 'Failed to access storage. Please try again.', [
+            { text: 'OK' }
+          ], 'alert-circle-outline', '#f87171');
         }
       } else {
         // For iOS, use app documents directory (accessible through Files app)
@@ -224,15 +242,20 @@ export default function SettingsPage() {
           { encoding: 'utf8' }
         );
 
-        Alert.alert(
+        showThemedAlert(
           'Export Complete',
-          `${routesData.length} routes exported successfully!\n\nFiles saved to WIW-routes folder in app Documents.\nAccess through Files app.`
+          `${routesData.length} routes exported successfully!\n\nFiles saved to WIW-routes folder in app Documents.\nAccess through Files app.`,
+          [{ text: 'OK' }],
+          'checkmark-circle-outline',
+          '#34d399'
         );
       }
 
     } catch (error) {
       console.error('Error exporting data:', error);
-      Alert.alert('Export Error', 'Failed to export route data. Please try again.');
+      showThemedAlert('Export Error', 'Failed to export route data. Please try again.', [
+        { text: 'OK' }
+      ], 'alert-circle-outline', '#f87171');
     }
   };
 
@@ -249,12 +272,16 @@ export default function SettingsPage() {
 
       // Validate inputs
       if (isNaN(intervalSeconds) || intervalSeconds < 1) {
-        Alert.alert('Invalid Input', 'Time interval must be at least 1 second.');
+        showThemedAlert('Invalid Input', 'Time interval must be at least 1 second.', [
+          { text: 'OK' }
+        ], 'warning-outline', '#f59e0b');
         return;
       }
 
       if (isNaN(intervalM) || intervalM < 1) {
-        Alert.alert('Invalid Input', 'Distance interval must be at least 1 meter.');
+        showThemedAlert('Invalid Input', 'Distance interval must be at least 1 meter.', [
+          { text: 'OK' }
+        ], 'warning-outline', '#f59e0b');
         return;
       }
 
@@ -262,10 +289,14 @@ export default function SettingsPage() {
       setTrackingIntervalSeconds(intervalSeconds);
       setTrackingIntervalM(intervalM);
       setShowTrackingModal(false);
-      Alert.alert('Success', 'Tracking settings updated successfully.');
+      showThemedAlert('Success', 'Tracking settings updated successfully.', [
+        { text: 'OK' }
+      ], 'checkmark-circle-outline', '#34d399');
     } catch (error) {
       console.error('Error saving tracking settings:', error);
-      Alert.alert('Error', 'Failed to save tracking settings.');
+      showThemedAlert('Error', 'Failed to save tracking settings.', [
+        { text: 'OK' }
+      ], 'alert-circle-outline', '#f87171');
     }
   };
 
@@ -360,177 +391,35 @@ export default function SettingsPage() {
         </ScrollView>
 
         {/* Tracking Settings Modal */}
-        <Modal
+        <TrackingSettingsModal
           visible={showTrackingModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowTrackingModal(false)}
-          statusBarTranslucent={true}
-        >
-          <TouchableOpacity
-            style={getStyles(theme).modalOverlay}
-            activeOpacity={1}
-            onPress={() => setShowTrackingModal(false)}
-          >
-            <StatusBar
-              style={isDark ? "light" : "dark"}
-              backgroundColor="transparent"
-            />
-            <TouchableOpacity
-              style={getStyles(theme).modalContainer}
-              activeOpacity={1}
-              onPress={(e) => e.stopPropagation()}
-            >
-              <Text style={getStyles(theme).modalTitle}>Tracking Settings</Text>
-
-              <View style={getStyles(theme).inputContainer}>
-                <Text style={getStyles(theme).inputLabel}>Time Interval (seconds)</Text>
-                <TextInput
-                  style={getStyles(theme).textInput}
-                  value={tempIntervalSeconds}
-                  onChangeText={setTempIntervalSeconds}
-                  keyboardType="numeric"
-                  placeholder="5"
-                  placeholderTextColor={theme.textTertiary}
-                />
-                <Text style={getStyles(theme).inputHint}>Minimum: 1 second</Text>
-              </View>
-
-              <View style={getStyles(theme).inputContainer}>
-                <Text style={getStyles(theme).inputLabel}>Distance Interval (meters)</Text>
-                <TextInput
-                  style={getStyles(theme).textInput}
-                  value={tempIntervalM}
-                  onChangeText={setTempIntervalM}
-                  keyboardType="numeric"
-                  placeholder="10"
-                  placeholderTextColor={theme.textTertiary}
-                />
-                <Text style={getStyles(theme).inputHint}>Minimum: 1 meter</Text>
-              </View>
-
-              <View style={getStyles(theme).modalButtons}>
-                <TouchableOpacity
-                  style={[getStyles(theme).modalButton, getStyles(theme).cancelButton]}
-                  onPress={() => setShowTrackingModal(false)}
-                >
-                  <Text style={getStyles(theme).cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[getStyles(theme).modalButton, getStyles(theme).saveButton]}
-                  onPress={saveTrackingSettings}
-                >
-                  <Text style={getStyles(theme).saveButtonText}>Save</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
+          onClose={() => setShowTrackingModal(false)}
+          onSave={saveTrackingSettings}
+          tempIntervalSeconds={tempIntervalSeconds}
+          setTempIntervalSeconds={setTempIntervalSeconds}
+          tempIntervalM={tempIntervalM}
+          setTempIntervalM={setTempIntervalM}
+          isDark={isDark}
+          theme={theme}
+        />
 
         {/* Clear Data Confirmation Modal */}
-        <Modal
+        <ClearDataConfirmationModal
           visible={showClearDataModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowClearDataModal(false)}
-          statusBarTranslucent={true}
-        >
-          <TouchableOpacity
-            style={getStyles(theme).modalOverlay}
-            activeOpacity={1}
-            onPress={() => setShowClearDataModal(false)}
-          >
-            <StatusBar
-              style={isDark ? "light" : "dark"}
-              backgroundColor="transparent"
-            />
-            <TouchableOpacity
-              style={getStyles(theme).confirmationModalContainer}
-              activeOpacity={1}
-              onPress={(e) => e.stopPropagation()}
-            >
-              <Ionicons
-                name="trash-outline"
-                size={48}
-                color={theme.error || theme.primary}
-                style={getStyles(theme).confirmationIcon}
-              />
-              <Text style={getStyles(theme).confirmationTitle}>Clear All Data</Text>
-              <Text style={getStyles(theme).confirmationMessage}>
-                Are you sure you want to delete all your route data? This action cannot be undone.
-              </Text>
-
-              <View style={getStyles(theme).confirmationButtons}>
-                <TouchableOpacity
-                  style={[getStyles(theme).confirmationButton, getStyles(theme).cancelButton]}
-                  onPress={() => setShowClearDataModal(false)}
-                >
-                  <Text style={getStyles(theme).cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[getStyles(theme).confirmationButton, getStyles(theme).destructiveButton]}
-                  onPress={confirmClearData}
-                >
-                  <Text style={getStyles(theme).destructiveButtonText}>Delete</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
+          onClose={() => setShowClearDataModal(false)}
+          onConfirm={confirmClearData}
+          isDark={isDark}
+          theme={theme}
+        />
 
         {/* Export Data Confirmation Modal */}
-        <Modal
+        <ExportDataConfirmationModal
           visible={showExportModal}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setShowExportModal(false)}
-          statusBarTranslucent={true}
-        >
-          <TouchableOpacity
-            style={getStyles(theme).modalOverlay}
-            activeOpacity={1}
-            onPress={() => setShowExportModal(false)}
-          >
-            <StatusBar
-              style={isDark ? "light" : "dark"}
-              backgroundColor="transparent"
-            />
-            <TouchableOpacity
-              style={getStyles(theme).confirmationModalContainer}
-              activeOpacity={1}
-              onPress={(e) => e.stopPropagation()}
-            >
-              <Ionicons
-                name="download-outline"
-                size={48}
-                color={theme.primary}
-                style={getStyles(theme).confirmationIcon}
-              />
-              <Text style={getStyles(theme).confirmationTitle}>Export Routes</Text>
-              <Text style={getStyles(theme).confirmationMessage}>
-                This will export all your routes as separate JSON files. Continue?
-              </Text>
-
-              <View style={getStyles(theme).confirmationButtons}>
-                <TouchableOpacity
-                  style={[getStyles(theme).confirmationButton, getStyles(theme).cancelButton]}
-                  onPress={() => setShowExportModal(false)}
-                >
-                  <Text style={getStyles(theme).cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[getStyles(theme).confirmationButton, getStyles(theme).saveButton]}
-                  onPress={confirmExportData}
-                >
-                  <Text style={getStyles(theme).saveButtonText}>Export</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
+          onClose={() => setShowExportModal(false)}
+          onConfirm={confirmExportData}
+          isDark={isDark}
+          theme={theme}
+        />
       </SafeAreaView>
     </View>
   );

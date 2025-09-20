@@ -6,9 +6,9 @@
 import {
     addCoordinateRecord,
     CoordinateRecord,
-    getAllRoutes,
     getCoordinateCountForRoute,
     getCoordinatesForRoute,
+    getRoutes,
     initializeDatabase,
     removeCoordinatesForRoute
 } from './database';
@@ -44,7 +44,8 @@ export const databaseUsageExample = async () => {
         console.log(`Route "${routeName}" has ${count} coordinates`);
 
         // Get all unique routes
-        const allRoutes = await getAllRoutes();
+        const routes = await getRoutes();
+        const allRoutes = routes.map(route => route.name);
         console.log('All routes:', allRoutes);
 
         // Remove all coordinates for a specific route

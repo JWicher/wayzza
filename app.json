@@ -4,7 +4,7 @@
     "slug": "where-i-was",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/wiw-icon-transparent.png",
     "scheme": "whereiwas",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -13,9 +13,11 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app needs access to location when open to track your trips.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to location to track your trips."
-      }
+      },
+      "bundleIdentifier": "com.ctsjwtest.whereiwas"
     },
     "android": {
+      "icon": "./assets/images/wiw-icon-transparent.png",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -27,7 +29,8 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      "package": "com.ctsjwtest.whereiwas"
     },
     "web": {
       "output": "static",
@@ -51,6 +54,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "55b91b8a-2985-4059-b08a-b924879f24ac"
+      }
     }
   }
 }

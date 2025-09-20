@@ -1,6 +1,8 @@
 import { Stack } from "expo-router";
 import { StatusBar } from 'expo-status-bar';
 import { View, useColorScheme } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ThemedAlertProvider } from '../components/modals';
 import { ThemeProvider, darkTheme, lightTheme, useTheme } from '../contexts/ThemeContext';
 
 function ThemedStack() {
@@ -60,10 +62,14 @@ export default function RootLayout() {
   const initialBackground = systemColorScheme === 'dark' ? darkTheme.background : lightTheme.background;
 
   return (
-    <View style={{ flex: 1, backgroundColor: initialBackground }}>
-      <ThemeProvider>
-        <ThemedStack />
-      </ThemeProvider>
-    </View>
+    <SafeAreaProvider>
+      <View style={{ flex: 1, backgroundColor: initialBackground }}>
+        <ThemeProvider>
+          <ThemedAlertProvider>
+            <ThemedStack />
+          </ThemedAlertProvider>
+        </ThemeProvider>
+      </View>
+    </SafeAreaProvider>
   );
 }

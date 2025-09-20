@@ -2,20 +2,17 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as NavigationBar from 'expo-navigation-bar';
 import { router, useFocusEffect } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-    Alert,
     FlatList,
-    Modal,
-    SafeAreaView,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { DeleteConfirmationModal, EditRouteModal, showThemedAlert } from '../components/modals';
 import { darkMapStyle, lightMapStyle } from '../constants/mapStyles';
 import { useTheme } from '../contexts/ThemeContext';
 import {
@@ -24,6 +21,7 @@ import {
     deleteRoute,
     getCoordinatesForRoute,
     getTrackingSettings,
+    initializeDatabase,
     RouteRecord,
     updateRoute
 } from '../lib/database';
@@ -58,7 +56,6 @@ export default function TrackingPage() {
     const [currentRoute, setCurrentRoute] = useState<RouteRecord | null>(null);
 
     // Auto-created route management
-    const [autoCreatedRoute, setAutoCreatedRoute] = useState<RouteRecord | null>(null);
     const [hasEverStartedTracking, setHasEverStartedTracking] = useState(false);
 
     // Dynamic tracking intervals loaded from settings
@@ -68,9 +65,11 @@ export default function TrackingPage() {
     // Edit modal state
     const [showEditModal, setShowEditModal] = useState(false);
     const [editRouteName, setEditRouteName] = useState('');
-    const [isEditLoading, setIsEditLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+    // Ref to store current route for cleanup function
+    const currentRouteRef = useRef<RouteRecord | null>(null);
 
 
     // Load tracking settings from database
@@ -90,23 +89,58 @@ export default function TrackingPage() {
     useEffect(() => {
         const initializeTrackingPage = async () => {
             try {
+                console.log('Initializing tracking page...');
+                await initializeDatabase();
+                console.log('Database initialized, loading settings...');
                 await loadTrackingSettings();
+                console.log('Settings loaded, creating auto route...');
                 await createAutoRoute();
+                console.log('Auto route created, requesting permissions...');
                 await requestLocationPermissions();
+                console.log('Tracking page initialization complete');
             } catch (error) {
                 console.error('Error initializing tracking page:', error);
-                Alert.alert('Initialization Error', 'Failed to initialize tracking.');
+                showThemedAlert('Initialization Error', 'Failed to initialize tracking.', [
+                    { text: 'OK' }
+                ], 'warning-outline', '#f59e0b');
             }
         };
 
         initializeTrackingPage();
 
         return () => {
+            console.log('TrackingPage: Component unmounting, running cleanup...');
             if (locationSubscription) {
                 locationSubscription.remove();
+                console.log('TrackingPage: Location subscription removed');
             }
-            // Cleanup auto-created route if tracking was never started
-            cleanupAutoCreatedRoute();
+            // Cleanup unused route if tracking was never started
+            console.log('TrackingPage: Starting cleanup of unused route...');
+
+            // Make cleanup synchronous to ensure it completes before navigation
+            const route = currentRouteRef.current;
+            if (route?.id) {
+                console.log('TrackingPage: Synchronous cleanup for route:', route.id, route.name);
+
+                // Check if route has coordinates synchronously and delete if empty
+                getCoordinatesForRoute(route.id)
+                    .then(coordinates => {
+                        if (coordinates.length === 0 && route.id) {
+                            console.log('TrackingPage: Route has no coordinates, deleting:', route.name);
+                            return deleteRoute(route.id);
+                        } else {
+                            console.log('TrackingPage: Route has coordinates, keeping it');
+                        }
+                    })
+                    .then(() => {
+                        console.log('TrackingPage: Cleanup completed');
+                    })
+                    .catch(error => {
+                        console.error('TrackingPage: Error during cleanup:', error);
+                    });
+            } else {
+                console.log('TrackingPage: No route to cleanup');
+            }
         };
     }, []);
 
@@ -130,13 +164,19 @@ export default function TrackingPage() {
         }
     }, [coordinates]);
 
+    // Update the ref whenever currentRoute changes
+    useEffect(() => {
+        currentRouteRef.current = currentRoute;
+    }, [currentRoute]);
+
     const requestLocationPermissions = async () => {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert(
+            showThemedAlert(
                 'Permission Required',
                 'Please grant location permissions to track your trip.',
-                [{ text: 'OK' }]
+                [{ text: 'OK' }],
+                'location-outline'
             );
         }
     };
@@ -168,7 +208,7 @@ export default function TrackingPage() {
             console.log('Auto route name:', autoRouteName);
 
             const route = await createRoute(autoRouteName);
-            setAutoCreatedRoute(route);
+
             setCurrentRoute(route);
             setCoordinates([]); // Clear coordinates for new route
 
@@ -179,27 +219,64 @@ export default function TrackingPage() {
         }
     };
 
-    const cleanupAutoCreatedRoute = async () => {
-        // Only delete the auto-created route if tracking was never started
-        if (autoCreatedRoute && !hasEverStartedTracking) {
+    const cleanupUnusedRoute = async () => {
+        // Delete the current route if it has no coordinates
+        // Use ref to get the current value instead of closure-captured value
+        const route = currentRouteRef.current;
+        console.log('cleanupUnusedRoute: Checking route for cleanup:', route?.id, route?.name);
+
+        if (route?.id) {
             try {
-                await deleteRoute(autoCreatedRoute.id!);
-                console.log('Deleted unused auto-created route:', autoCreatedRoute.name);
-                setAutoCreatedRoute(null);
+                const routeCoordinates = await getCoordinatesForRoute(route.id);
+                console.log('cleanupUnusedRoute: Route has', routeCoordinates.length, 'coordinates');
+                if (routeCoordinates.length === 0) {
+                    console.log('cleanupUnusedRoute: Deleting unused route:', route.name, '(ID:', route.id, ')');
+                    await deleteRoute(route.id);
+                    console.log('cleanupUnusedRoute: Successfully deleted unused route');
+                    setCurrentRoute(null);
+                    setCoordinates([]);
+                } else {
+                    console.log('cleanupUnusedRoute: Route has coordinates, keeping it');
+                }
             } catch (error) {
-                console.error('Error deleting auto-created route:', error);
+                console.error('cleanupUnusedRoute: Error cleaning up unused route:', error);
             }
+        } else {
+            console.log('cleanupUnusedRoute: No route to cleanup');
         }
     };
 
-    const openEditModal = () => {
+    const openEditModal = async () => {
         NavigationBar.setVisibilityAsync("hidden");
         console.log('Edit button clicked, currentRoute:', currentRoute);
-        if (!currentRoute) {
-            Alert.alert('No Route Available', 'Please wait for the route to load or start tracking to create a route.');
-            return;
+
+        let routeToEdit = currentRoute;
+
+        // Create a new route if one doesn't exist
+        if (!routeToEdit) {
+            try {
+                console.log('No current route, creating new route for editing...');
+                // Generate a unique name with timestamp
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const date = timestamp.split('T')[0];
+                const time = timestamp.split('T')[1].substring(0, 8).replace(/-/g, ':');
+                const autoRouteName = `${date} ${time}`;
+
+                const newRoute = await createRoute(autoRouteName);
+                setCurrentRoute(newRoute);
+                setCoordinates([]);
+                routeToEdit = newRoute;
+                console.log('Created new route for editing:', newRoute);
+            } catch (error) {
+                console.error('Error creating route for editing:', error);
+                showThemedAlert('Route Creation Failed', 'Unable to create a new route.', [
+                    { text: 'OK' }
+                ], 'alert-circle-outline', '#f87171');
+                return;
+            }
         }
-        setEditRouteName(currentRoute.name);
+
+        setEditRouteName(routeToEdit.name);
         setShowEditModal(true);
     };
 
@@ -208,7 +285,9 @@ export default function TrackingPage() {
 
         const trimmedName = editRouteName.trim();
         if (!trimmedName) {
-            Alert.alert('Invalid Name', 'Please enter a route name.');
+            showThemedAlert('Invalid Name', 'Please enter a route name.', [
+                { text: 'OK' }
+            ], 'warning-outline', '#f59e0b');
             return;
         }
 
@@ -225,7 +304,9 @@ export default function TrackingPage() {
             setShowEditModal(false);
         } catch (error) {
             console.error('Error updating route:', error);
-            Alert.alert('Error', 'Failed to update route. The name might already exist.');
+            showThemedAlert('Error', 'Failed to update route. The name might already exist.', [
+                { text: 'OK' }
+            ], 'alert-circle-outline', '#f87171');
         } finally {
             setIsSaving(false);
         }
@@ -247,7 +328,9 @@ export default function TrackingPage() {
             router.replace('/');
         } catch (error) {
             console.error('Error deleting route:', error);
-            Alert.alert('Error', 'Failed to delete route.');
+            showThemedAlert('Error', 'Failed to delete route.', [
+                { text: 'OK' }
+            ], 'alert-circle-outline', '#f87171');
         }
     };
 
@@ -282,15 +365,47 @@ export default function TrackingPage() {
 
 
 
+
+
     const startTracking = async () => {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission denied', 'Location permission is required to track your trip.');
+            showThemedAlert('Permission denied', 'Location permission is required to track your trip.', [
+                { text: 'OK' }
+            ], 'location-outline', '#f87171');
             return;
         }
 
-        if (!currentRoute) {
-            Alert.alert('No Route Selected', 'Please select or create a route before tracking.');
+        let routeToUse = currentRoute;
+
+        // Create a new route if one doesn't exist
+        if (!routeToUse) {
+            try {
+                console.log('No current route, creating new route for tracking...');
+                // Generate a unique name with timestamp
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const date = timestamp.split('T')[0];
+                const time = timestamp.split('T')[1].substring(0, 8).replace(/-/g, ':');
+                const autoRouteName = `${date} ${time}`;
+
+                const newRoute = await createRoute(autoRouteName);
+                setCurrentRoute(newRoute);
+                setCoordinates([]);
+                routeToUse = newRoute;
+                console.log('Created new route for tracking:', newRoute);
+            } catch (error) {
+                console.error('Error creating route for tracking:', error);
+                showThemedAlert('Route Creation Failed', 'Unable to create a new route for tracking.', [
+                    { text: 'OK' }
+                ], 'alert-circle-outline', '#f87171');
+                return;
+            }
+        }
+
+        if (!routeToUse?.id) {
+            showThemedAlert('Route Error', 'Unable to create or access a route for tracking.', [
+                { text: 'OK' }
+            ], 'alert-circle-outline', '#f87171');
             return;
         }
 
@@ -315,7 +430,7 @@ export default function TrackingPage() {
                 try {
                     // Save to database
                     await addCoordinateRecord(
-                        currentRoute.id!,
+                        routeToUse.id!,
                         newCoordinate.latitude,
                         newCoordinate.longitude,
                         newCoordinate.timestamp
@@ -378,7 +493,6 @@ export default function TrackingPage() {
                             isTracking ? getStyles(theme).stopButton : getStyles(theme).startButton,
                         ]}
                         onPress={isTracking ? stopTracking : startTracking}
-                        disabled={!currentRoute}
                     >
                         <Ionicons
                             name={isTracking ? "stop-circle" : "play-circle"}
@@ -395,20 +509,15 @@ export default function TrackingPage() {
                         style={[
                             getStyles(theme).button,
                             getStyles(theme).editButton,
-                            (isTracking || !currentRoute) && getStyles(theme).editButtonDisabled,
                         ]}
                         onPress={openEditModal}
-                        disabled={isTracking || !currentRoute}
                     >
                         <Ionicons
                             name="create-outline"
                             size={20}
-                            color={(isTracking || !currentRoute) ? theme.textTertiary : theme.secondary}
+                            color={theme.secondary}
                         />
-                        <Text style={[
-                            getStyles(theme).editButtonText,
-                            (isTracking || !currentRoute) && getStyles(theme).editButtonTextDisabled
-                        ]}>
+                        <Text style={getStyles(theme).editButtonText}>
                             {!currentRoute ? 'Loading...' : 'Edit'}
                         </Text>
                     </TouchableOpacity>
@@ -495,121 +604,28 @@ export default function TrackingPage() {
             </View>
 
             {/* Edit Route Modal */}
-            <Modal
+            <EditRouteModal
                 visible={showEditModal}
-                animationType="slide"
-                transparent={true}
-                onRequestClose={() => setShowEditModal(false)}
-                statusBarTranslucent={true}
-            >
-                <TouchableOpacity
-                    style={getStyles(theme).modalOverlay}
-                    activeOpacity={1}
-                    onPress={() => setShowEditModal(false)}
-                >
-                    <StatusBar
-                        style={isDark ? "light" : "dark"}
-                        backgroundColor="transparent"
-                    />
-                    <TouchableOpacity
-                        style={getStyles(theme).modalContainer}
-                        activeOpacity={1}
-                        onPress={(e) => e.stopPropagation()}
-                    >
-                        <Text style={getStyles(theme).modalTitle}>Edit Route</Text>
-
-                        <View style={getStyles(theme).inputContainer}>
-                            <Text style={getStyles(theme).inputLabel}>Route Name</Text>
-                            <TextInput
-                                style={getStyles(theme).textInput}
-                                value={editRouteName}
-                                onChangeText={setEditRouteName}
-                                placeholder="Enter route name"
-                                placeholderTextColor={theme.textTertiary}
-                                autoFocus={true}
-                                editable={!isSaving}
-                            />
-                        </View>
-
-                        <View style={getStyles(theme).modalButtons}>
-                            <TouchableOpacity
-                                style={[getStyles(theme).modalButton, getStyles(theme).modalCancelButton]}
-                                onPress={() => setShowEditModal(false)}
-                                disabled={isSaving}
-                            >
-                                <Text style={getStyles(theme).modalCancelButtonText}>Cancel</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={[getStyles(theme).modalButton, getStyles(theme).modalSaveButton]}
-                                onPress={handleEditSave}
-                                disabled={isSaving}
-                            >
-                                <Text style={getStyles(theme).modalSaveButtonText}>
-                                    {isSaving ? 'Saving...' : 'Save'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        <TouchableOpacity
-                            style={getStyles(theme).deleteButtonSection}
-                            onPress={handleEditDelete}
-                            disabled={isSaving}
-                        >
-                            <Ionicons name="trash-outline" size={20} color={theme.error} />
-                            <Text style={getStyles(theme).deleteButtonText}>Delete Route</Text>
-                        </TouchableOpacity>
-                    </TouchableOpacity>
-                </TouchableOpacity>
-            </Modal>
+                onClose={() => setShowEditModal(false)}
+                onSave={handleEditSave}
+                onDelete={handleEditDelete}
+                routeName={editRouteName}
+                setRouteName={setEditRouteName}
+                isSaving={isSaving}
+                isDark={isDark}
+                theme={theme}
+            />
 
             {/* Delete Confirmation Modal */}
-            <Modal
+            <DeleteConfirmationModal
                 visible={showDeleteConfirm}
-                animationType="fade"
-                transparent={true}
-                onRequestClose={() => setShowDeleteConfirm(false)}
-                statusBarTranslucent={true}
-            >
-                <TouchableOpacity
-                    style={getStyles(theme).modalOverlay}
-                    activeOpacity={1}
-                    onPress={() => setShowDeleteConfirm(false)}
-                >
-                    <TouchableOpacity
-                        style={getStyles(theme).confirmationModalContainer}
-                        activeOpacity={1}
-                        onPress={(e) => e.stopPropagation()}
-                    >
-                        <Ionicons
-                            name="trash-outline"
-                            size={48}
-                            color={theme.error}
-                            style={getStyles(theme).confirmationIcon}
-                        />
-                        <Text style={getStyles(theme).confirmationTitle}>Delete Route</Text>
-                        <Text style={getStyles(theme).confirmationMessage}>
-                            Are you sure you want to delete "{currentRoute?.name}"? This will also delete all coordinates for this route.
-                        </Text>
-
-                        <View style={getStyles(theme).confirmationButtons}>
-                            <TouchableOpacity
-                                style={[getStyles(theme).confirmationButton, getStyles(theme).cancelButton]}
-                                onPress={() => setShowDeleteConfirm(false)}
-                            >
-                                <Text style={getStyles(theme).cancelButtonText}>Cancel</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={[getStyles(theme).confirmationButton, getStyles(theme).destructiveButton]}
-                                onPress={confirmEditDelete}
-                            >
-                                <Text style={getStyles(theme).destructiveButtonText}>Delete</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </TouchableOpacity>
-                </TouchableOpacity>
-            </Modal>
+                onClose={() => setShowDeleteConfirm(false)}
+                onConfirm={confirmEditDelete}
+                title="Delete Route"
+                message={`Are you sure you want to delete "${currentRoute?.name}"? This will also delete all coordinates for this route.`}
+                isDark={isDark}
+                theme={theme}
+            />
         </SafeAreaView>
     );
 }

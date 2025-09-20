@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import { DeleteConfirmationModal, EditRouteModal, showThemedAlert } from '../components/modals';
 import { darkMapStyle, lightMapStyle } from '../constants/mapStyles';
 import { useTheme } from '../contexts/ThemeContext';
 import { CoordinateRecord, deleteRoute, getCoordinatesForRoute, getRouteById, updateRoute } from '../lib/database';
@@ -38,7 +38,9 @@ export default function MapPage() {
 
     const trimmedName = editRouteName.trim();
     if (!trimmedName) {
-      Alert.alert('Invalid Name', 'Please enter a route name.');
+      showThemedAlert('Invalid Name', 'Please enter a route name.', [
+        { text: 'OK' }
+      ], 'warning-outline', '#f59e0b');
       return;
     }
 
@@ -55,7 +57,9 @@ export default function MapPage() {
       setShowEditModal(false);
     } catch (error) {
       console.error('Error updating route:', error);
-      Alert.alert('Error', 'Failed to update route. The name might already exist.');
+      showThemedAlert('Error', 'Failed to update route. The name might already exist.', [
+        { text: 'OK' }
+      ], 'alert-circle-outline', '#f87171');
     } finally {
       setIsSaving(false);
     }
@@ -75,7 +79,9 @@ export default function MapPage() {
       router.replace('/');
     } catch (error) {
       console.error('Error deleting route:', error);
-      Alert.alert('Error', 'Failed to delete route.');
+      showThemedAlert('Error', 'Failed to delete route.', [
+        { text: 'OK' }
+      ], 'alert-circle-outline', '#f87171');
     }
   };
 
@@ -121,7 +127,9 @@ export default function MapPage() {
     } catch (error) {
       console.error('Error loading route data:', error);
       setError('Failed to load route data');
-      Alert.alert('Error', 'Failed to load route data from database.');
+      showThemedAlert('Error', 'Failed to load route data from database.', [
+        { text: 'OK' }
+      ], 'alert-circle-outline', '#f87171');
     } finally {
       setLoading(false);
     }
@@ -222,121 +230,28 @@ export default function MapPage() {
       </MapView>
 
       {/* Edit Route Modal */}
-      <Modal
+      <EditRouteModal
         visible={showEditModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowEditModal(false)}
-        statusBarTranslucent={true}
-      >
-        <TouchableOpacity
-          style={getStyles(theme).modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowEditModal(false)}
-        >
-          <StatusBar
-            style={isDark ? "light" : "dark"}
-            backgroundColor="transparent"
-          />
-          <TouchableOpacity
-            style={getStyles(theme).modalContainer}
-            activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <Text style={getStyles(theme).modalTitle}>Edit Route</Text>
-
-            <View style={getStyles(theme).inputContainer}>
-              <Text style={getStyles(theme).inputLabel}>Route Name</Text>
-              <TextInput
-                style={getStyles(theme).textInput}
-                value={editRouteName}
-                onChangeText={setEditRouteName}
-                placeholder="Enter route name"
-                placeholderTextColor={theme.textTertiary}
-                autoFocus={true}
-                editable={!isSaving}
-              />
-            </View>
-
-            <View style={getStyles(theme).modalButtons}>
-              <TouchableOpacity
-                style={[getStyles(theme).modalButton, getStyles(theme).modalCancelButton]}
-                onPress={() => setShowEditModal(false)}
-                disabled={isSaving}
-              >
-                <Text style={getStyles(theme).modalCancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[getStyles(theme).modalButton, getStyles(theme).modalSaveButton]}
-                onPress={handleEditSave}
-                disabled={isSaving}
-              >
-                <Text style={getStyles(theme).modalSaveButtonText}>
-                  {isSaving ? 'Saving...' : 'Save'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={getStyles(theme).deleteButtonSection}
-              onPress={handleEditDelete}
-              disabled={isSaving}
-            >
-              <Ionicons name="trash-outline" size={20} color={theme.error} />
-              <Text style={getStyles(theme).deleteButtonText}>Delete Route</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        onClose={() => setShowEditModal(false)}
+        onSave={handleEditSave}
+        onDelete={handleEditDelete}
+        routeName={editRouteName}
+        setRouteName={setEditRouteName}
+        isSaving={isSaving}
+        isDark={isDark}
+        theme={theme}
+      />
 
       {/* Delete Confirmation Modal */}
-      <Modal
+      <DeleteConfirmationModal
         visible={showDeleteConfirm}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => setShowDeleteConfirm(false)}
-        statusBarTranslucent={true}
-      >
-        <TouchableOpacity
-          style={getStyles(theme).modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowDeleteConfirm(false)}
-        >
-          <TouchableOpacity
-            style={getStyles(theme).confirmationModalContainer}
-            activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <Ionicons
-              name="trash-outline"
-              size={48}
-              color={theme.error}
-              style={getStyles(theme).confirmationIcon}
-            />
-            <Text style={getStyles(theme).confirmationTitle}>Delete Route</Text>
-            <Text style={getStyles(theme).confirmationMessage}>
-              Are you sure you want to delete "{currentRouteName || routeName}"? This will also delete all coordinates for this route.
-            </Text>
-
-            <View style={getStyles(theme).confirmationButtons}>
-              <TouchableOpacity
-                style={[getStyles(theme).confirmationButton, getStyles(theme).cancelButton]}
-                onPress={() => setShowDeleteConfirm(false)}
-              >
-                <Text style={getStyles(theme).cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[getStyles(theme).confirmationButton, getStyles(theme).destructiveButton]}
-                onPress={confirmEditDelete}
-              >
-                <Text style={getStyles(theme).destructiveButtonText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+        onClose={() => setShowDeleteConfirm(false)}
+        onConfirm={confirmEditDelete}
+        title="Delete Route"
+        message={`Are you sure you want to delete "${currentRouteName || routeName}"? This will also delete all coordinates for this route.`}
+        isDark={isDark}
+        theme={theme}
+      />
     </View>
   );
 }

@@ -3,16 +3,15 @@ import * as NavigationBar from 'expo-navigation-bar';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   FlatList,
-  Modal,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { DeleteConfirmationModal, showThemedAlert } from '../components/modals';
 import { useTheme } from '../contexts/ThemeContext';
 import {
   CoordinateRecord,
@@ -87,28 +86,68 @@ export default function Index() {
   const [loading, setLoading] = useState(true);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [routeToDelete, setRouteToDelete] = useState<DisplayRoute | null>(null);
+  const [isLoadingRoutes, setIsLoadingRoutes] = useState(false);
 
   // Load routes with enhanced data
-  const loadRoutes = async () => {
-    try {
-      setLoading(true);
-      const dbRoutes = await getRoutes();
+  const loadRoutes = async (retryCount = 0) => {
+    // Prevent concurrent loadRoutes calls
+    if (isLoadingRoutes) {
+      console.log('loadRoutes already in progress, skipping...');
+      return;
+    }
 
-      const enhancedRoutes: DisplayRoute[] = await Promise.all(
-        dbRoutes.map(async (route) => {
-          const coordinates = await getCoordinatesForRoute(route.id!);
+    try {
+      setIsLoadingRoutes(true);
+      setLoading(true);
+
+      console.log('Starting to load routes...');
+      const dbRoutes = await getRoutes();
+      console.log(`Retrieved ${dbRoutes.length} routes from database`);
+
+      // If no routes found, set empty array and finish
+      if (!dbRoutes || dbRoutes.length === 0) {
+        console.log('No routes found in database');
+        setRoutes([]);
+        console.log('Setting loading to false - no routes found');
+        setLoading(false);
+        setIsLoadingRoutes(false);
+        return;
+      }
+
+      const enhancedRoutes: DisplayRoute[] = [];
+
+      // Process routes individually to avoid complete failure if one route fails
+      for (const route of dbRoutes) {
+        try {
+          // Validate route has valid ID
+          if (!route.id || typeof route.id !== 'number') {
+            console.warn(`Skipping route with invalid ID:`, route);
+            continue;
+          }
+
+          const coordinates = await getCoordinatesForRoute(route.id);
           const distance = calculateRouteDistance(coordinates);
           const firstCoordinate = coordinates[0];
 
-          return {
-            id: route.id!,
-            name: route.name,
+          const enhancedRoute: DisplayRoute = {
+            id: route.id,
+            name: route.name || 'Unnamed Route',
             date: firstCoordinate ? formatDate(firstCoordinate.timestamp) : 'No data',
             distance: formatDistance(distance),
             coordinateCount: coordinates.length
           };
-        })
-      );
+
+          enhancedRoutes.push(enhancedRoute);
+          console.log(`Processed route: ${enhancedRoute.name} (${enhancedRoute.coordinateCount} points)`);
+        } catch (routeError) {
+          console.error(`Error processing route ${route.name} (ID: ${route.id}):`, routeError);
+
+          // Skip routes that fail to load (likely deleted routes) instead of showing them with error state
+          // This prevents deleted routes from briefly appearing in the list
+          console.log(`Skipping route ${route.name} (ID: ${route.id}) due to load error - likely deleted`);
+          continue;
+        }
+      }
 
       // Sort routes by most recent first (based on first coordinate timestamp)
       enhancedRoutes.sort((a, b) => {
@@ -118,12 +157,32 @@ export default function Index() {
         return new Date(b.date).getTime() - new Date(a.date).getTime();
       });
 
+      console.log(`Successfully loaded ${enhancedRoutes.length} routes`);
       setRoutes(enhancedRoutes);
+      console.log('Setting loading to false after successful route load');
     } catch (error) {
-      console.error('Error loading routes:', error);
-      Alert.alert('Error', 'Failed to load routes from database.');
+      console.error('Error loading routes (attempt', retryCount + 1, '):', error);
+
+      // Retry once on failure
+      if (retryCount < 1) {
+        console.log('Retrying loadRoutes...');
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms before retry
+        return loadRoutes(retryCount + 1);
+      }
+
+      // Show error after retry attempt
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      showThemedAlert(
+        'Database Error',
+        `Failed to load routes from database.\n\nError: ${errorMessage}\n\nPlease try restarting the app if this persists.`,
+        [{ text: 'OK' }],
+        'alert-circle-outline',
+        '#f87171'
+      );
     } finally {
+      console.log('Setting loading to false in finally block');
       setLoading(false);
+      setIsLoadingRoutes(false);
     }
   };
 
@@ -136,7 +195,15 @@ export default function Index() {
         await loadRoutes();
       } catch (error) {
         console.error('Error initializing database:', error);
-        Alert.alert('Initialization Error', 'Failed to initialize the database.');
+        showThemedAlert('Initialization Error', 'Failed to initialize the database.', [
+          { text: 'OK' }
+        ], 'warning-outline', '#f59e0b');
+
+        // Reset loading states so UI shows "No routes yet" instead of staying on "Loading..."
+        console.log('Setting loading to false due to database initialization error');
+        setLoading(false);
+        setIsLoadingRoutes(false);
+        setRoutes([]);
       }
     };
 
@@ -144,11 +211,24 @@ export default function Index() {
   }, []);
 
   // Reload routes when screen comes into focus (e.g., returning from settings)
+  // Skip initial focus to avoid race condition with useEffect
+  const [isInitialMount, setIsInitialMount] = useState(true);
+
   useFocusEffect(
     useCallback(() => {
+      if (isInitialMount) {
+        console.log('Initial focus detected, skipping reload to avoid race condition');
+        setIsInitialMount(false);
+        return;
+      }
       console.log('Index screen focused, reloading routes...');
-      loadRoutes();
-    }, [])
+
+      // Add a small delay to ensure any cleanup operations from other screens have completed
+      // This prevents race conditions with route deletions
+      setTimeout(() => {
+        loadRoutes();
+      }, 100); // Short 100ms delay - just enough to ensure cleanup completes
+    }, [isInitialMount])
   );
 
   useEffect(() => {
@@ -192,7 +272,9 @@ export default function Index() {
       await loadRoutes();
     } catch (error) {
       console.error('Error deleting route:', error);
-      Alert.alert('Error', 'Failed to delete the route. Please try again.');
+      showThemedAlert('Error', 'Failed to delete the route. Please try again.', [
+        { text: 'OK' }
+      ], 'alert-circle-outline', '#f87171');
     } finally {
       setLoading(false);
     }
@@ -287,58 +369,15 @@ export default function Index() {
         </View>
 
         {/* Delete Confirmation Modal */}
-        <Modal
-          animationType="slide"
-          transparent={true}
+        <DeleteConfirmationModal
           visible={deleteModalVisible}
-          onRequestClose={handleCancelDelete}
-          statusBarTranslucent={true}
-        >
-          <TouchableOpacity
-            style={getStyles(theme).modalOverlay}
-            activeOpacity={1}
-            onPress={() => setDeleteModalVisible(false)}
-          >
-
-
-            <View style={getStyles(theme).modalContainer}>
-              <TouchableOpacity
-                activeOpacity={1}
-              >
-                <View style={getStyles(theme).modalHeader}>
-                  <Ionicons name="warning" size={32} color={theme.error} />
-                  <Text style={getStyles(theme).modalTitle}>Delete Route</Text>
-                </View>
-
-                <Text style={getStyles(theme).modalMessage}>
-                  Are you sure you want to delete "{routeToDelete?.name}"?
-                </Text>
-
-                <Text style={getStyles(theme).modalWarning}>
-                  This action cannot be undone. All tracking data for this route will be permanently deleted.
-                </Text>
-
-                <View style={getStyles(theme).modalButtons}>
-                  <TouchableOpacity
-                    style={[getStyles(theme).modalButton, getStyles(theme).cancelButton]}
-                    onPress={handleCancelDelete}
-                  >
-                    <Text style={getStyles(theme).cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[getStyles(theme).modalButton, getStyles(theme).deleteButton]}
-                    onPress={handleDeleteRoute}
-                  >
-                    <Text style={getStyles(theme).deleteButtonText}>Delete</Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-
-            </View>
-          </TouchableOpacity>
-
-        </Modal>
+          onClose={handleCancelDelete}
+          onConfirm={handleDeleteRoute}
+          title="Delete Route"
+          message={`Are you sure you want to delete "${routeToDelete?.name}"?`}
+          warning="This action cannot be undone. All tracking data for this route will be permanently deleted."
+          theme={theme}
+        />
       </SafeAreaView>
     </View>
   );

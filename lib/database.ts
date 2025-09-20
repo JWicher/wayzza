@@ -28,77 +28,118 @@ export interface SettingsRecord {
 
 // Database instance
 let db: SQLite.SQLiteDatabase | null = null;
+let isInitializing = false;
+let isDatabaseReady = false;
+let initializationPromise: Promise<void> | null = null;
 
 /**
  * Initialize the database and create the coordinates table if it doesn't exist
  */
 export const initializeDatabase = async (): Promise<void> => {
-    try {
-        if (!db) {
-            db = await SQLite.openDatabaseAsync(DATABASE_NAME);
-        }
-
-        // Create the routes table if it doesn't exist
-        await db.execAsync(`
-      CREATE TABLE IF NOT EXISTS ${ROUTES_TABLE} (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-        // Create the coordinates table if it doesn't exist
-        await db.execAsync(`
-      CREATE TABLE IF NOT EXISTS ${COORDINATES_TABLE} (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        route_id INTEGER NOT NULL,
-        latitude REAL NOT NULL,
-        longitude REAL NOT NULL,
-        timestamp INTEGER NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (route_id) REFERENCES ${ROUTES_TABLE}(id) ON DELETE CASCADE
-      );
-    `);
-
-        // Create the settings table if it doesn't exist
-        await db.execAsync(`
-      CREATE TABLE IF NOT EXISTS ${SETTINGS_TABLE} (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        key TEXT NOT NULL UNIQUE,
-        value TEXT NOT NULL,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-        // Create indexes for better query performance
-        await db.execAsync(`
-      CREATE INDEX IF NOT EXISTS idx_route_id ON ${COORDINATES_TABLE}(route_id);
-    `);
-        await db.execAsync(`
-      CREATE INDEX IF NOT EXISTS idx_route_name ON ${ROUTES_TABLE}(name);
-    `);
-        await db.execAsync(`
-      CREATE INDEX IF NOT EXISTS idx_setting_key ON ${SETTINGS_TABLE}(key);
-    `);
-
-        // Initialize default settings if they don't exist
-        await initializeDefaultSettings();
-
-        console.log('Database initialized successfully');
-    } catch (error) {
-        console.error('Error initializing database:', error);
-        throw error;
+    // Prevent concurrent initialization
+    if (isDatabaseReady && db) {
+        console.log('Database already initialized');
+        return;
     }
+
+    if (isInitializing && initializationPromise) {
+        console.log('Database initialization in progress, waiting...');
+        return initializationPromise;
+    }
+
+    isInitializing = true;
+
+    initializationPromise = (async () => {
+        try {
+            console.log('Initializing database...');
+
+            if (!db) {
+                db = await SQLite.openDatabaseAsync(DATABASE_NAME);
+                console.log('Database connection opened');
+            }
+
+            // Create the routes table if it doesn't exist
+            await db.execAsync(`
+          CREATE TABLE IF NOT EXISTS ${ROUTES_TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+
+            // Create the coordinates table if it doesn't exist
+            await db.execAsync(`
+          CREATE TABLE IF NOT EXISTS ${COORDINATES_TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            route_id INTEGER NOT NULL,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            timestamp INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (route_id) REFERENCES ${ROUTES_TABLE}(id) ON DELETE CASCADE
+          );
+        `);
+
+            // Create the settings table if it doesn't exist
+            await db.execAsync(`
+          CREATE TABLE IF NOT EXISTS ${SETTINGS_TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL UNIQUE,
+            value TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+
+            // Create indexes for better query performance
+            await db.execAsync(`
+          CREATE INDEX IF NOT EXISTS idx_route_id ON ${COORDINATES_TABLE}(route_id);
+        `);
+            await db.execAsync(`
+          CREATE INDEX IF NOT EXISTS idx_route_name ON ${ROUTES_TABLE}(name);
+        `);
+            await db.execAsync(`
+          CREATE INDEX IF NOT EXISTS idx_setting_key ON ${SETTINGS_TABLE}(key);
+        `);
+
+            // Initialize default settings if they don't exist
+            await initializeDefaultSettings(db);
+
+            console.log('Database initialized successfully');
+            isDatabaseReady = true;
+        } catch (error) {
+            console.error('Error initializing database:', error);
+            db = null; // Reset db on error
+            isDatabaseReady = false;
+            throw error;
+        } finally {
+            isInitializing = false;
+            initializationPromise = null;
+        }
+    })();
+
+    return initializationPromise;
 };
 
 /**
  * Get the database instance (initialize if needed)
  */
 const getDatabase = async (): Promise<SQLite.SQLiteDatabase> => {
-    if (!db) {
+    // If initialization is in progress, wait for it regardless of db state
+    if (isInitializing && initializationPromise) {
+        console.log('Database initialization in progress, waiting for completion...');
+        await initializationPromise;
+    }
+
+    // If no database exists or not ready, initialize it
+    if (!db || !isDatabaseReady) {
         await initializeDatabase();
     }
-    return db!;
+
+    if (!db || !isDatabaseReady) {
+        throw new Error('Failed to initialize database');
+    }
+
+    return db;
 };
 
 /**
@@ -319,19 +360,6 @@ export const removeCoordinatesForRoute = async (routeId: number): Promise<number
     }
 };
 
-/**
- * Get all unique route names from the database (deprecated - use getRoutes instead)
- * @returns Promise that resolves to an array of route names
- */
-export const getAllRoutes = async (): Promise<string[]> => {
-    try {
-        const routes = await getRoutes();
-        return routes.map(route => route.name);
-    } catch (error) {
-        console.error('Error getting all routes:', error);
-        throw error;
-    }
-};
 
 /**
  * Get the total count of coordinates for a given route
@@ -402,9 +430,8 @@ export const clearAllData = async (): Promise<{ coordinatesDeleted: number, rout
 /**
  * Initialize default settings
  */
-const initializeDefaultSettings = async (): Promise<void> => {
+const initializeDefaultSettings = async (database: SQLite.SQLiteDatabase): Promise<void> => {
     try {
-        const database = await getDatabase();
 
         // Default tracking interval settings
         const defaultSettings = [
@@ -593,3 +620,4 @@ export const closeDatabase = async (): Promise<void> => {
         throw error;
     }
 };
+
