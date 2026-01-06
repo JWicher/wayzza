@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as NavigationBar from 'expo-navigation-bar';
 import { router, useFocusEffect } from 'expo-router';
+import * as TaskManager from 'expo-task-manager';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     FlatList,
@@ -14,6 +16,7 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DeleteConfirmationModal, EditRouteModal, showThemedAlert } from '../components/modals';
 import { darkMapStyle, lightMapStyle } from '../constants/mapStyles';
+import { usePermissions } from '../contexts/PermissionContext';
 import { useTheme } from '../contexts/ThemeContext';
 import {
     addCoordinateRecord,
@@ -36,6 +39,66 @@ interface Coordinate {
 const DEFAULT_TRACKING_INTERVAL_SECONDS = 5;
 const DEFAULT_TRACKING_INTERVAL_M = 10;
 
+// Background location task name
+const BACKGROUND_LOCATION_TASK = 'background-location-task';
+
+// Track if background task is defined
+let isTaskDefined = false;
+
+// Define the background location task only when needed
+const defineBackgroundLocationTask = () => {
+    if (isTaskDefined) return;
+
+    try {
+        TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
+            if (error) {
+                console.error('Background location task error:', error);
+                return;
+            }
+
+            if (data) {
+                const { locations }: any = data;
+                console.log('Received background location update:', locations.length, 'locations');
+
+                // Handle background location data
+                for (const location of locations) {
+                    try {
+                        // We need to get the current route ID from AsyncStorage since we can't access React state here
+                        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                        const currentRouteData = await AsyncStorage.getItem('currentTrackingRoute');
+
+                        if (currentRouteData) {
+                            const routeInfo = JSON.parse(currentRouteData);
+
+                            // Import database functions (they should work in background task)
+                            const { addCoordinateRecord, initializeDatabase } = require('../lib/database');
+
+                            // Ensure database is initialized
+                            await initializeDatabase();
+
+                            // Save the location
+                            await addCoordinateRecord(
+                                routeInfo.id,
+                                location.coords.latitude,
+                                location.coords.longitude,
+                                location.timestamp || Date.now()
+                            );
+
+                            console.log('Background location saved for route:', routeInfo.id);
+                        }
+                    } catch (err) {
+                        console.error('Error processing background location:', err);
+                    }
+                }
+            }
+        });
+        isTaskDefined = true;
+        console.log('Background task defined successfully');
+    } catch (error) {
+        console.error('Error defining background task:', error);
+    }
+};
+
 const biskupinCoords = {
     latitude: 52.793000, // Default to Warsaw, Poland
     longitude: 17.734000,
@@ -45,8 +108,10 @@ const biskupinCoords = {
 
 export default function TrackingPage() {
     const { theme, isDark } = useTheme();
+    const { foregroundPermissionGranted, backgroundPermissionGranted } = usePermissions();
     const [isTracking, setIsTracking] = useState(false);
     const [accuracy, setAccuracy] = useState<number>();
+    const [initializationError, setInitializationError] = useState<string | null>(null);
 
     const [coordinates, setCoordinates] = useState<Coordinate[]>([]);
     const [locationSubscription, setLocationSubscription] = useState<Location.LocationSubscription | null>(null);
@@ -90,30 +155,56 @@ export default function TrackingPage() {
         const initializeTrackingPage = async () => {
             try {
                 console.log('Initializing tracking page...');
+
+                // Add safety check for permissions context
+                if (!foregroundPermissionGranted && !backgroundPermissionGranted) {
+                    console.log('Waiting for permissions to be checked...');
+                    return;
+                }
+
                 await initializeDatabase();
                 console.log('Database initialized, loading settings...');
                 await loadTrackingSettings();
                 console.log('Settings loaded, creating auto route...');
                 await createAutoRoute();
-                console.log('Auto route created, requesting permissions...');
-                await requestLocationPermissions();
                 console.log('Tracking page initialization complete');
             } catch (error) {
                 console.error('Error initializing tracking page:', error);
+                setInitializationError('Failed to initialize tracking. Please restart the app.');
                 showThemedAlert('Initialization Error', 'Failed to initialize tracking.', [
                     { text: 'OK' }
                 ], 'warning-outline', '#f59e0b');
             }
         };
 
-        initializeTrackingPage();
-
+        // Delay initialization to ensure contexts are ready
+        const timer = setTimeout(initializeTrackingPage, 500);
         return () => {
+            clearTimeout(timer);
+
             console.log('TrackingPage: Component unmounting, running cleanup...');
+
+            // Stop location tracking
             if (locationSubscription) {
                 locationSubscription.remove();
                 console.log('TrackingPage: Location subscription removed');
             }
+
+            // Stop background location tracking
+            const stopBackgroundLocation = async () => {
+                try {
+                    const isBackgroundTaskRunning = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
+                    if (isBackgroundTaskRunning) {
+                        await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+                        console.log('TrackingPage: Background location tracking stopped');
+                    }
+                    await AsyncStorage.removeItem('currentTrackingRoute');
+                } catch (error) {
+                    console.error('TrackingPage: Error stopping background location:', error);
+                }
+            };
+            stopBackgroundLocation();
+
             // Cleanup unused route if tracking was never started
             console.log('TrackingPage: Starting cleanup of unused route...');
 
@@ -142,7 +233,7 @@ export default function TrackingPage() {
                 console.log('TrackingPage: No route to cleanup');
             }
         };
-    }, []);
+    }, [foregroundPermissionGranted, backgroundPermissionGranted]);
 
     // Update map view when coordinates change
     useEffect(() => {
@@ -169,17 +260,28 @@ export default function TrackingPage() {
         currentRouteRef.current = currentRoute;
     }, [currentRoute]);
 
-    const requestLocationPermissions = async () => {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-            showThemedAlert(
-                'Permission Required',
-                'Please grant location permissions to track your trip.',
-                [{ text: 'OK' }],
-                'location-outline'
-            );
-        }
-    };
+    // Periodically reload coordinates from database during tracking
+    // This ensures we see coordinates saved by background task
+    useEffect(() => {
+        if (!isTracking || !currentRoute?.id) return;
+
+        const intervalId = setInterval(async () => {
+            try {
+                const dbCoordinates = await getCoordinatesForRoute(currentRoute.id!);
+                const formattedCoordinates = dbCoordinates.map(coord => ({
+                    latitude: coord.latitude,
+                    longitude: coord.longitude,
+                    timestamp: coord.timestamp
+                }));
+                setCoordinates(formattedCoordinates);
+            } catch (error) {
+                console.error('Error reloading coordinates during tracking:', error);
+            }
+        }, 3000); // Reload every 3 seconds
+
+        return () => clearInterval(intervalId);
+    }, [isTracking, currentRoute?.id]);
+
 
 
     const loadCoordinatesForRoute = async (routeId: number) => {
@@ -368,13 +470,19 @@ export default function TrackingPage() {
 
 
     const startTracking = async () => {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-            showThemedAlert('Permission denied', 'Location permission is required to track your trip.', [
-                { text: 'OK' }
-            ], 'location-outline', '#f87171');
+        // Check if foreground permissions are granted
+        if (!foregroundPermissionGranted) {
+            showThemedAlert(
+                'Permission Required',
+                'Location permissions are required to track your trip. Please restart the app and grant permissions.',
+                [{ text: 'OK' }],
+                'location-outline'
+            );
             return;
         }
+
+        // Define the background task before using it
+        defineBackgroundLocationTask();
 
         let routeToUse = currentRoute;
 
@@ -412,47 +520,97 @@ export default function TrackingPage() {
         setIsTracking(true);
         setHasEverStartedTracking(true);
 
-        // Start location subscription - gather coordinates using dynamic intervals from settings
-        const subscription = await Location.watchPositionAsync(
-            {
-                accuracy: Location.Accuracy.High,
-                timeInterval: trackingIntervalSeconds * 1000, // Convert seconds to milliseconds for Location API
-                distanceInterval: trackingIntervalM, // Use dynamic distance interval from settings
-            },
-            async (location) => {
-                const newCoordinate: Coordinate = {
-                    latitude: location.coords.latitude,
-                    longitude: location.coords.longitude,
-                    timestamp: Date.now(),
-                };
-                console.log('New coordinate gathered:', newCoordinate);
+        try {
+            // Store route information in AsyncStorage for background task access
+            await AsyncStorage.setItem('currentTrackingRoute', JSON.stringify({
+                id: routeToUse.id,
+                name: routeToUse.name
+            }));
 
-                try {
-                    // Save to database
-                    await addCoordinateRecord(
-                        routeToUse.id!,
-                        newCoordinate.latitude,
-                        newCoordinate.longitude,
-                        newCoordinate.timestamp
-                    );
+            // Use the background permission status from context
+            const canUseBackground = backgroundPermissionGranted;
 
-                    // Update state array for UI
-                    setCoordinates(prev => [...prev, newCoordinate]);
-                    setAccuracy(location.coords.accuracy || 0);
-                } catch (error) {
-                    console.error('Error saving coordinate to database:', error);
-                }
+            if (canUseBackground) {
+                console.log('Starting background location tracking...');
+
+                // Start background location tracking
+                await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+                    accuracy: Location.Accuracy.High,
+                    timeInterval: trackingIntervalSeconds * 1000,
+                    distanceInterval: trackingIntervalM,
+                    deferredUpdatesInterval: 1000, // Batch updates every second
+                    showsBackgroundLocationIndicator: true, // iOS only
+                    foregroundService: {
+                        notificationTitle: 'Where I Was',
+                        notificationBody: 'Tracking your location in the background',
+                    },
+                });
+                console.log('Background location tracking started');
+            } else {
+                console.log('Background permissions not granted, using foreground tracking only');
             }
-        );
 
-        setLocationSubscription(subscription);
+            // Also start foreground tracking for immediate UI updates
+            const subscription = await Location.watchPositionAsync(
+                {
+                    accuracy: Location.Accuracy.High,
+                    timeInterval: trackingIntervalSeconds * 1000,
+                    distanceInterval: trackingIntervalM,
+                },
+                async (location) => {
+                    const newCoordinate: Coordinate = {
+                        latitude: location.coords.latitude,
+                        longitude: location.coords.longitude,
+                        timestamp: Date.now(),
+                    };
+                    console.log('New foreground coordinate gathered:', newCoordinate);
+
+                    try {
+                        // Save to database
+                        await addCoordinateRecord(
+                            routeToUse.id!,
+                            newCoordinate.latitude,
+                            newCoordinate.longitude,
+                            newCoordinate.timestamp
+                        );
+
+                        // Update state array for UI
+                        setCoordinates(prev => [...prev, newCoordinate]);
+                        setAccuracy(location.coords.accuracy || 0);
+                    } catch (error) {
+                        console.error('Error saving coordinate to database:', error);
+                    }
+                }
+            );
+
+            setLocationSubscription(subscription);
+        } catch (error) {
+            console.error('Error starting location tracking:', error);
+            setIsTracking(false);
+        }
     };
 
-    const stopTracking = () => {
+    const stopTracking = async () => {
         setIsTracking(false);
-        if (locationSubscription) {
-            locationSubscription.remove();
-            setLocationSubscription(null);
+
+        try {
+            // Stop foreground location subscription
+            if (locationSubscription) {
+                locationSubscription.remove();
+                setLocationSubscription(null);
+            }
+
+            // Stop background location tracking
+            const isBackgroundTaskRunning = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
+            if (isBackgroundTaskRunning) {
+                await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+                console.log('Background location tracking stopped');
+            }
+
+            // Clear the route information from AsyncStorage
+            await AsyncStorage.removeItem('currentTrackingRoute');
+        } catch (error) {
+            console.error('Error stopping location tracking:', error);
         }
     };
 
@@ -477,6 +635,43 @@ export default function TrackingPage() {
     );
 
 
+
+    // Show error state if initialization failed
+    if (initializationError) {
+        return (
+            <SafeAreaView style={getStyles(theme).container}>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                    <Ionicons
+                        name="warning-outline"
+                        size={64}
+                        color={theme.error}
+                        style={{ marginBottom: 20 }}
+                    />
+                    <Text style={{ color: theme.error, fontSize: 18, textAlign: 'center' }}>
+                        {initializationError}
+                    </Text>
+                    <TouchableOpacity
+                        style={{
+                            backgroundColor: theme.primary,
+                            paddingHorizontal: 20,
+                            paddingVertical: 10,
+                            borderRadius: 8,
+                            marginTop: 20
+                        }}
+                        onPress={() => {
+                            setInitializationError(null);
+                            // Try to re-initialize
+                            router.replace('/tracking');
+                        }}
+                    >
+                        <Text style={{ color: theme.white, fontSize: 16, fontWeight: '600' }}>
+                            Retry
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+            </SafeAreaView>
+        );
+    }
 
     return (
         <SafeAreaView style={getStyles(theme).container}>

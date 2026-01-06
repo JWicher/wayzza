@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemedAlertProvider } from '../components/modals';
+import { PermissionProvider } from '../contexts/PermissionContext';
 import { ThemeProvider, darkTheme, lightTheme, useTheme } from '../contexts/ThemeContext';
 
 function ThemedStack() {
@@ -29,7 +30,7 @@ function ThemedStack() {
       >
         <Stack.Screen name="index" options={{
           title: 'Where I Was',
-          headerShown: true,
+          headerShown: false,
           contentStyle: {
             backgroundColor: theme.background,
           }
@@ -65,9 +66,11 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <View style={{ flex: 1, backgroundColor: initialBackground }}>
         <ThemeProvider>
-          <ThemedAlertProvider>
-            <ThemedStack />
-          </ThemedAlertProvider>
+          <PermissionProvider>
+            <ThemedAlertProvider>
+              <ThemedStack />
+            </ThemedAlertProvider>
+          </PermissionProvider>
         </ThemeProvider>
       </View>
     </SafeAreaProvider>

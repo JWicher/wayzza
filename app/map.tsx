@@ -33,6 +33,13 @@ export default function MapPage() {
     setShowEditModal(true);
   };
 
+  // Continue route function
+  const handleContinueRoute = () => {
+    if (!routeId) return;
+    console.log('Continue tracking route:', currentRouteName || routeName);
+    router.push(`/tracking?routeId=${routeId}&routeName=${encodeURIComponent(currentRouteName || routeName || '')}`);
+  };
+
   const handleEditSave = async () => {
     if (!routeId) return;
 
@@ -187,19 +194,32 @@ export default function MapPage() {
       <View style={getStyles(theme).header}>
         <View style={getStyles(theme).headerContent}>
           <View style={getStyles(theme).routeInfo}>
-            <Text style={getStyles(theme).routeTitle}>
-              {currentRouteName || routeName || 'Route Map'}
-            </Text>
-            <Text style={getStyles(theme).coordinateCount}>
-              {coordinates.length} points
-            </Text>
+            <View style={getStyles(theme).routeDetailInfoContainer}>
+              <Text style={getStyles(theme).routeTitle}>
+                {currentRouteName || routeName || 'Route Map'}
+              </Text>
+              <TouchableOpacity
+                style={getStyles(theme).editButton}
+                onPress={openEditModal}
+              >
+                <Ionicons name="create-outline" size={24} color={theme.primary} />
+              </TouchableOpacity>
+            </View>
+            <View style={getStyles(theme).routeDetailInfoContainer}>
+
+              <Text style={getStyles(theme).coordinateCount}>
+                {coordinates.length} points
+              </Text>
+              <TouchableOpacity
+                style={getStyles(theme).continueButton}
+                onPress={handleContinueRoute}
+              >
+                <Ionicons name="play-skip-forward" size={20} color={theme.white} />
+                <Text style={getStyles(theme).continueButtonText}>Continue</Text>
+              </TouchableOpacity>
+            </View>
+
           </View>
-          <TouchableOpacity
-            style={getStyles(theme).editButton}
-            onPress={openEditModal}
-          >
-            <Ionicons name="create-outline" size={24} color={theme.primary} />
-          </TouchableOpacity>
         </View>
       </View>
       <MapView
@@ -263,7 +283,7 @@ const getStyles = (theme: any) => StyleSheet.create({
   },
   header: {
     backgroundColor: theme.surface,
-    padding: 15,
+    padding: 10,
     borderBottomWidth: 1,
     borderBottomColor: theme.border || '#E5E5E5',
   },
@@ -275,6 +295,14 @@ const getStyles = (theme: any) => StyleSheet.create({
   routeInfo: {
     flex: 1,
     alignItems: 'center',
+  },
+  routeDetailInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: 8,
+    padding: 2
   },
   routeTitle: {
     color: theme.text,
@@ -292,6 +320,21 @@ const getStyles = (theme: any) => StyleSheet.create({
     padding: 8,
     borderRadius: 8,
     backgroundColor: 'transparent',
+  },
+  continueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.secondary,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    gap: 6,
+  },
+  continueButtonText: {
+    color: theme.white,
+    fontSize: 14,
+    fontWeight: '600',
   },
   map: {
     flex: 1,
