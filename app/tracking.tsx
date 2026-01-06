@@ -239,38 +239,50 @@ export default function TrackingPage() {
 
             // Cleanup unused route only if it was auto-created and never used
             // Don't cleanup routes that were loaded from URL params (continuing existing routes)
-            console.log('TrackingPage: Starting cleanup of unused route...');
+            console.log('[CLEANUP] Starting cleanup check...');
 
             const route = currentRouteRef.current;
             const hasCoordinates = hasSavedCoordinates.current;
 
-            // Only cleanup if this was NOT a route loaded from URL params AND we haven't saved any coordinates
-            if (route?.id && !routeId && !hasCoordinates) {
-                console.log('TrackingPage: Checking auto-created route for cleanup:', route.id, route.name);
+            console.log('[CLEANUP] Route:', route?.id, route?.name);
+            console.log('[CLEANUP] Has coordinates flag:', hasCoordinates);
+            console.log('[CLEANUP] From URL params:', !!routeId);
 
-                // Double-check database to be safe, but we already know from the ref
-                getCoordinatesForRoute(route.id)
-                    .then(coordinates => {
-                        if (coordinates.length === 0 && route.id) {
-                            console.log('TrackingPage: Route has no coordinates, deleting:', route.name);
-                            return deleteRoute(route.id);
-                        } else {
-                            console.log('TrackingPage: Route has', coordinates.length, 'coordinates, keeping it');
-                        }
-                    })
-                    .then(() => {
-                        console.log('TrackingPage: Cleanup completed');
-                    })
-                    .catch(error => {
-                        console.error('TrackingPage: Error during cleanup:', error);
-                    });
+            // ZMIENIONE: Bardziej ostrożny cleanup - czekamy dłużej przed usunięciem
+            // Only cleanup if this was NOT a route loaded from URL params AND we haven't saved any coordinates
+            // I TYLKO jeśli tracking NIE był aktywny (nie usuwaj jeśli user startował tracking)
+            if (route?.id && !routeId && !hasCoordinates && !isTracking) {
+                console.log('[CLEANUP] Checking if route should be deleted...');
+
+                // Dodatkowe opóźnienie - daj szansę na zapisanie pierwszej współrzędnej
+                setTimeout(() => {
+                    // Double-check database to be safe
+                    getCoordinatesForRoute(route.id!)
+                        .then(coordinates => {
+                            console.log('[CLEANUP] Database check: found', coordinates.length, 'coordinates');
+                            if (coordinates.length === 0 && route.id) {
+                                console.log('[CLEANUP] ⚠️ Deleting empty route:', route.name);
+                                return deleteRoute(route.id);
+                            } else {
+                                console.log('[CLEANUP] ✓ Keeping route with', coordinates.length, 'coordinates');
+                            }
+                        })
+                        .then(() => {
+                            console.log('[CLEANUP] Cleanup completed');
+                        })
+                        .catch(error => {
+                            console.error('[CLEANUP] ❌ Error during cleanup:', error);
+                        });
+                }, 2000); // 2 second delay to allow first coordinate to save
             } else {
                 if (routeId) {
-                    console.log('TrackingPage: Skipping cleanup - route was loaded from params (continuing existing route)');
+                    console.log('[CLEANUP] ✓ Skipping - route from URL params');
                 } else if (hasCoordinates) {
-                    console.log('TrackingPage: Skipping cleanup - route has saved coordinates');
+                    console.log('[CLEANUP] ✓ Skipping - has saved coordinates');
+                } else if (isTracking) {
+                    console.log('[CLEANUP] ✓ Skipping - tracking is active, don\'t delete!');
                 } else {
-                    console.log('TrackingPage: No route to cleanup');
+                    console.log('[CLEANUP] ℹ️ No route to cleanup');
                 }
             }
         };
@@ -593,6 +605,10 @@ export default function TrackingPage() {
             return;
         }
 
+        console.log('[TRACKING] ========== STARTING TRACKING ==========');
+        console.log('[TRACKING] Route ID:', routeToUse.id);
+        console.log('[TRACKING] Route Name:', routeToUse.name);
+
         setIsTracking(true);
         setHasEverStartedTracking(true);
 
@@ -602,11 +618,13 @@ export default function TrackingPage() {
                 id: routeToUse.id,
                 name: routeToUse.name
             }));
+            console.log('[TRACKING] Route info saved to AsyncStorage');
 
             // Use the background permission status from context
             // TYMCZASOWO WYŁĄCZONE - TEST CZY TO POWODUJE CRASH
             const canUseBackground = false; // BYŁO: backgroundPermissionGranted;
-            console.log('[DEBUG] Background tracking DISABLED for testing crash');
+            console.log('[TRACKING] Background tracking DISABLED for testing');
+            console.log('[TRACKING] Will use FOREGROUND tracking only');
 
             if (canUseBackground) {
                 console.log('Starting background location tracking...');
@@ -625,10 +643,17 @@ export default function TrackingPage() {
                 });
                 console.log('Background location tracking started');
             } else {
-                console.log('Background permissions not granted, using foreground tracking only (or disabled for testing)');
+                console.log('[TRACKING] Background permissions not granted, using foreground tracking only');
             }
 
             // Also start foreground tracking for immediate UI updates
+            console.log('[TRACKING] Starting foreground location tracking...');
+            console.log('[TRACKING] Config:', {
+                accuracy: 'High',
+                timeInterval: trackingIntervalSeconds * 1000,
+                distanceInterval: trackingIntervalM
+            });
+
             const subscription = await Location.watchPositionAsync(
                 {
                     accuracy: Location.Accuracy.High,
@@ -641,33 +666,60 @@ export default function TrackingPage() {
                         longitude: location.coords.longitude,
                         timestamp: Date.now(),
                     };
-                    console.log('New foreground coordinate gathered:', newCoordinate);
+                    console.log('[TRACKING] ✓ New coordinate received:', newCoordinate);
+                    console.log('[TRACKING] Accuracy:', location.coords.accuracy, 'm');
 
                     try {
                         // Save to database
+                        console.log('[TRACKING] Saving to database, route ID:', routeToUse.id);
                         await addCoordinateRecord(
                             routeToUse.id!,
                             newCoordinate.latitude,
                             newCoordinate.longitude,
                             newCoordinate.timestamp
                         );
+                        console.log('[TRACKING] ✓ Saved to database successfully!');
 
                         // Mark that we've saved coordinates (prevents premature cleanup)
                         hasSavedCoordinates.current = true;
+                        console.log('[TRACKING] hasSavedCoordinates flag set to true');
 
                         // Update state array for UI
-                        setCoordinates(prev => [...prev, newCoordinate]);
+                        setCoordinates(prev => {
+                            const updated = [...prev, newCoordinate];
+                            console.log('[TRACKING] UI updated, total coordinates:', updated.length);
+                            return updated;
+                        });
                         setAccuracy(location.coords.accuracy || 0);
                     } catch (error) {
-                        console.error('Error saving coordinate to database:', error);
+                        console.error('[TRACKING] ❌ ERROR saving coordinate:', error);
                     }
                 }
             );
 
             setLocationSubscription(subscription);
+            console.log('[TRACKING] ✓ Foreground tracking started successfully!');
+            console.log('[TRACKING] Subscription active:', !!subscription);
+            console.log('[TRACKING] ========== TRACKING IS ACTIVE ==========');
+
+            // Show success message to user
+            showThemedAlert(
+                'Tracking Started',
+                `Tracking your location. Stay on this screen to record your route.`,
+                [{ text: 'OK' }],
+                'checkmark-circle-outline',
+                '#10b981'
+            );
         } catch (error) {
-            console.error('Error starting location tracking:', error);
+            console.error('[TRACKING] ❌ ERROR starting location tracking:', error);
             setIsTracking(false);
+            showThemedAlert(
+                'Tracking Error',
+                `Failed to start tracking: ${error}`,
+                [{ text: 'OK' }],
+                'alert-circle-outline',
+                '#ef4444'
+            );
         }
     };
 
