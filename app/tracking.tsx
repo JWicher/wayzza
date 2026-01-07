@@ -695,15 +695,6 @@ export default function TrackingPage() {
             console.log('[TRACKING] ✓ Foreground tracking started successfully!');
             console.log('[TRACKING] Subscription active:', !!subscription);
             console.log('[TRACKING] ========== TRACKING IS ACTIVE ==========');
-
-            // Show success message to user
-            showThemedAlert(
-                'Tracking Started',
-                `Tracking your location. Stay on this screen to record your route.`,
-                [{ text: 'OK' }],
-                'checkmark-circle-outline',
-                '#10b981'
-            );
         } catch (error) {
             console.error('[TRACKING] ❌ ERROR starting location tracking:', error);
             setIsTracking(false);
