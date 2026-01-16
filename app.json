@@ -1,28 +1,26 @@
 {
     "expo": {
-        "name": "Wayza",
+        "name": "Wayzza",
         "slug": "where-i-was",
         "version": "1.0.0",
         "orientation": "portrait",
-        "icon": "./assets/icons/favicon_192.png",
+        "icon": "./assets/icons/icon.png",
         "scheme": "whereiwas",
         "userInterfaceStyle": "automatic",
         "newArchEnabled": true,
         "ios": {
-            "icon": "./assets/icons/favicon_192.png",
+            "icon": "./assets/icons/icon.png",
             "supportsTablet": true,
             "infoPlist": {
                 "NSLocationWhenInUseUsageDescription": "This app needs access to location when open to track your trips.",
                 "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to location to track your trips even when running in the background.",
                 "NSLocationAlwaysUsageDescription": "This app needs access to location to track your trips even when running in the background.",
-                "UIBackgroundModes": [
-                    "location"
-                ]
+                "UIBackgroundModes": ["location"]
             },
             "bundleIdentifier": "com.ctsjwtest.whereiwas"
         },
         "android": {
-            "icon": "./assets/icons/favicon_192.png",
+            "icon": "./assets/icons/icon.png",
             "adaptiveIcon": {
                 "foregroundImage": "./assets/icons/android_adaptive_foreground_1080.png",
                 "backgroundImage": "./assets/icons/android_adaptive_background_1080.png"
@@ -40,14 +38,14 @@
         },
         "web": {
             "output": "static",
-            "favicon": "./assets/icons/favicon_192.png"
+            "favicon": "./assets/icons/icon.png"
         },
         "plugins": [
             "expo-router",
             [
                 "expo-splash-screen",
                 {
-                    "image": "./assets/images/splash-icon.png",
+                    "image": "./assets/images/splash.png",
                     "imageWidth": 200,
                     "resizeMode": "contain",
                     "backgroundColor": "#f5f5f5",
