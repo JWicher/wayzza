@@ -371,18 +371,6 @@ export default function SettingsPage() {
                             onPress={handleClearData}
                         />
                     </View>
-
-                    {/* About Section */}
-                    <View style={getStyles(theme).sectionBottom}>
-                        <Text style={getStyles(theme).sectionTitle}>About</Text>
-
-                        <SettingItem
-                            icon="information-circle-outline"
-                            title="App Version"
-                            subtitle="1.0.0"
-                        />
-
-                    </View>
                 </ScrollView>
 
                 {/* Tracking Settings Modal */}

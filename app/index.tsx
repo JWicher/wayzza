@@ -70,11 +70,7 @@ const formatDistance = (distanceKm: number): string => {
 // Format date for display
 const formatDate = (timestamp: number): string => {
     const date = new Date(timestamp);
-    return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-    });
+    return date.toISOString().substring(0, 10);
 };
 
 export default function Index() {
@@ -295,11 +291,6 @@ export default function Index() {
                 <Text style={getStyles(theme).routeDate}>{item.date}</Text>
                 <Text style={getStyles(theme).routeDistance}>{item.distance}</Text>
             </View>
-            <View style={getStyles(theme).routeStats}>
-                <Text style={getStyles(theme).routeStatsText}>
-                    {item.coordinateCount} points
-                </Text>
-            </View>
         </Pressable>
     );
 
@@ -467,17 +458,6 @@ const getStyles = (theme: any) => StyleSheet.create({
         fontSize: 14,
         color: theme.accent,
         fontWeight: '500',
-    },
-    routeStats: {
-        marginTop: 8,
-        paddingTop: 8,
-        borderTopWidth: 1,
-        borderTopColor: theme.border || '#E5E5E5',
-    },
-    routeStatsText: {
-        fontSize: 12,
-        color: theme.textTertiary,
-        fontStyle: 'italic',
     },
     loadingContainer: {
         flex: 1,
